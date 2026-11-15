@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>物理持握道具模块</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud">
+      <div id="crosshair"><div id="crosshair-dot"></div><div id="crosshair-ring"></div></div>
+      <div id="lock-hint">
+        <div class="lock-hint-card">
+          <h2>物理持握演示</h2>
+          <p>点击进入场景。准星对准道具后按左键抓取。</p>
+          <p class="dim">WASD 移动 · 滚轮调持握距离 · R+鼠标旋转道具 · 左键释放</p>
+        </div>
+      </div>
+      <div id="toast"></div>
+      <div id="panel"></div>
+      <div id="help"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
