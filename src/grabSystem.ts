@@ -50,6 +50,8 @@ export class GrabSystem {
   lastTarget: HandTarget | null = null;
 
   onEvent: (msg: string, warn?: boolean) => void = () => {};
+  /** Fired whenever a constraint is created or torn down, with the new count. */
+  onConstraintCountChange: (count: number) => void = () => {};
 
   private readonly propByCollider = new Map<number, PropHandle>();
   private readonly interpolator = new TargetInterpolator();
@@ -107,6 +109,7 @@ export class GrabSystem {
     const handQuat = camera.getWorldQuaternion(new THREE.Quaternion());
     const constraint = new SoftGrabConstraint(prop.body, point, hit.normal, handQuat);
     this.held = { prop, constraint };
+    this.onConstraintCountChange(1);
     // The held prop must not collide with the player capsule.
     for (const c of prop.colliders) {
       c.setCollisionGroups(collisionGroups(0x2, 0x7 & ~GROUP_PLAYER));
@@ -116,17 +119,64 @@ export class GrabSystem {
   }
 
   release(silent = false): void {
-    if (!this.held) return;
-    for (const c of this.held.prop.colliders) {
-      c.setCollisionGroups(collisionGroups(0x2, 0x7));
+    const held = this.held;
+    if (!held) return;
+    this.detachHeld();
+    if (!silent) this.onEvent(`已释放：${held.prop.spec.label}`);
+  }
+
+  /**
+   * Tears down an active hold at the physics boundary. Rapier keeps user
+   * forces/torques across world.step() until they are explicitly reset, so
+   * detaching without clearing them leaves the last constraint force acting
+   * on the prop forever. A body removed by another subsystem can no longer
+   * accept calls, hence the liveness check.
+   */
+  private detachHeld(): void {
+    const held = this.held;
+    if (!held) return;
+    // Liveness must be probed through the numeric handle: the JS wrappers of
+    // a removed body and its colliders stay cached in the compat layer and
+    // are returned even though the native objects are gone, and touching
+    // them traps in wasm. External removal frees the whole object at once, so
+    // none of its colliders may be touched either.
+    const alive = this.world.getRigidBody(held.prop.body.handle) !== null;
+    if (alive) {
+      for (const c of held.prop.colliders) {
+        c.setCollisionGroups(collisionGroups(0x2, 0x7));
+      }
+      held.prop.body.resetForces(true);
+      held.prop.body.resetTorques(true);
     }
-    if (!silent) this.onEvent(`已释放：${this.held.prop.spec.label}`);
     this.held = null;
     this.diag = null;
+    this.onConstraintCountChange(0);
+  }
+
+  /**
+   * Removes a prop from the simulation. A held prop is released through the
+   * normal boundary first so its constraint cannot outlive the body, then the
+   * colliders are unregistered from the identity maps before Rapier frees
+   * them: stale handles are reused by new colliders and would otherwise
+   * resolve to the wrong prop.
+   * Returns false when the prop is already gone.
+   */
+  removeProp(prop: PropHandle): boolean {
+    if (this.world.getRigidBody(prop.body.handle) === null) return false;
+    if (this.held?.prop === prop) this.detachHeld();
+    for (const c of prop.colliders) this.propByCollider.delete(c.handle);
+    for (const c of prop.colliders) this.world.removeCollider(c, true);
+    this.world.removeRigidBody(prop.body);
+    return true;
   }
 
   get isHolding(): boolean {
     return this.held !== null;
+  }
+
+  /** Number of active soft-grab constraints (always 0 or 1). */
+  get constraintCount(): number {
+    return this.held ? 1 : 0;
   }
 
   /** R + mouse: rotate the held prop relative to the hand (yaw/pitch). */
@@ -149,6 +199,14 @@ export class GrabSystem {
   tick(dt: number, eye: THREE.Vector3, viewQuat: THREE.Quaternion): void {
     const target = computeHandTarget(eye, viewQuat, this.handDistance);
     this.lastTarget = target;
+    // Control events (release/removal) can land between physics ticks. Verify
+    // the held body still exists before touching it: a freed handle must end
+    // the hold instead of driving a constraint against a dead body.
+    if (this.held && this.world.getRigidBody(this.held.prop.body.handle) === null) {
+      const label = this.held.prop.spec.label;
+      this.detachHeld();
+      this.onEvent(`目标已销毁，约束自动解除：${label}`, true);
+    }
     if (!this.held) {
       this.substepCount = 1;
       this.world.timestep = dt;

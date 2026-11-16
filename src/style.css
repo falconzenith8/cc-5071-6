@@ -163,6 +163,38 @@ body {
 .toggle-row input {
   accent-color: #5db8e8;
 }
+.lifecycle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 0;
+}
+.constraint-count {
+  font-variant-numeric: tabular-nums;
+  color: #8b96a5;
+}
+.constraint-count[data-active='1'] {
+  color: #6fce6f;
+}
+#lifecycle-row button,
+.lifecycle-row button {
+  padding: 5px 10px;
+  border: 1px solid #5a6675;
+  border-radius: 6px;
+  background: #2a323d;
+  color: #e8eef5;
+  cursor: pointer;
+  font-size: 12px;
+}
+.lifecycle-row button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.lifecycle-row button:not(:disabled):hover {
+  border-color: #ff7a5c;
+  color: #ff9a82;
+}
 .kv {
   display: grid;
   grid-template-columns: 92px 1fr;

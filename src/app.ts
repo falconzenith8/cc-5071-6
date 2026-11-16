@@ -61,7 +61,9 @@ export class App {
     this.grab = new GrabSystem(this.R, this.world, props);
     this.ui = new UI(this.grab);
     this.grab.onEvent = (msg, warn) => this.ui.toast(msg, warn);
+    this.grab.onConstraintCountChange = (count) => this.ui.setConstraintCount(count);
     this.ui.onToggleGhost = (v) => this.hand.setGhostVisible(v);
+    this.ui.onDeleteHeld = () => this.deleteHeldProp();
 
     this.bindInput();
     window.addEventListener('resize', () => this.onResize());
@@ -170,6 +172,10 @@ export class App {
         this.ui.toggleHelp();
         return;
       }
+      if (e.code === 'KeyX') {
+        this.deleteHeldProp();
+        return;
+      }
       this.keys.add(e.code);
     });
     document.addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -182,6 +188,26 @@ export class App {
       },
       { passive: true },
     );
+  }
+
+  private deleteHeldProp(): void {
+    const held = this.grab.held;
+    if (!held) {
+      this.grab.onEvent('没有可删除的持握道具', true);
+      return;
+    }
+    const prop = held.prop;
+    if (!this.grab.removeProp(prop)) {
+      this.grab.onEvent('道具已被销毁', true);
+      return;
+    }
+    const idx = this.propVisuals.findIndex((v) => v.handle === prop);
+    if (idx >= 0) {
+      const [visual] = this.propVisuals.splice(idx, 1);
+      this.scene.remove(visual.group);
+      for (const mat of visual.materials) mat.dispose();
+    }
+    this.grab.onEvent(`已销毁：${prop.spec.label}`);
   }
 
   private frame(now: number): void {

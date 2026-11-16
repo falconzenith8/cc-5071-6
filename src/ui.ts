@@ -14,12 +14,15 @@ interface SliderSpec {
 
 export class UI {
   onToggleGhost: (visible: boolean) => void = () => {};
+  onDeleteHeld: () => void = () => {};
 
   private readonly panel: HTMLElement;
   private readonly help: HTMLElement;
   private readonly toastBox: HTMLElement;
   private readonly lockHint: HTMLElement;
   private readonly crosshair: HTMLElement;
+  private constraintCountEl!: HTMLElement;
+  private deleteBtn!: HTMLButtonElement;
   private readonly readouts = new Map<string, HTMLElement>();
   private readonly sliders: Array<{ spec: SliderSpec; input: HTMLInputElement; out: HTMLOutputElement }> = [];
   private errorBar!: HTMLElement;
@@ -48,6 +51,14 @@ export class UI {
 
   setHover(hover: boolean): void {
     this.crosshair.classList.toggle('hover', hover);
+  }
+
+  /** Reflects the active soft-grab constraint count (0 or 1) in the panel. */
+  setConstraintCount(count: number): void {
+    if (!this.constraintCountEl) return;
+    this.constraintCountEl.textContent = `活动约束：${count}`;
+    this.constraintCountEl.dataset.active = String(count);
+    if (this.deleteBtn) this.deleteBtn.disabled = count === 0;
   }
 
   private slider(spec: SliderSpec): HTMLElement {
@@ -162,6 +173,20 @@ export class UI {
     );
     p.appendChild(this.toggle('显示幽灵手（期望目标）', () => true, (v) => this.onToggleGhost(v)));
 
+    const lifecycle = document.createElement('div');
+    lifecycle.className = 'lifecycle-row';
+    this.constraintCountEl = document.createElement('span');
+    this.constraintCountEl.className = 'constraint-count';
+    this.deleteBtn = document.createElement('button');
+    this.deleteBtn.id = 'delete-held-btn';
+    this.deleteBtn.type = 'button';
+    this.deleteBtn.textContent = '销毁持握道具 (X)';
+    this.deleteBtn.disabled = true;
+    this.deleteBtn.addEventListener('click', () => this.onDeleteHeld());
+    lifecycle.append(this.constraintCountEl, this.deleteBtn);
+    p.appendChild(lifecycle);
+    this.setConstraintCount(0);
+
     p.appendChild(h3('持握状态'));
     const kv = document.createElement('div');
     kv.className = 'kv';
@@ -200,7 +225,7 @@ export class UI {
   private buildHelp(): void {
     this.help.innerHTML = [
       '<b>左键</b> 抓取/释放 · <b>滚轮</b> 持握距离 · <b>R+鼠标</b> 旋转道具 · <b>Q/E</b> 翻滚',
-      '<b>WASD</b> 移动 · <b>Shift</b> 疾跑 · <b>空格</b> 跳跃 · <b>H</b> 帮助 · <b>Esc</b> 释放鼠标',
+      '<b>WASD</b> 移动 · <b>Shift</b> 疾跑 · <b>空格</b> 跳跃 · <b>H</b> 帮助 · <b>X</b> 销毁持握道具 · <b>Esc</b> 释放鼠标',
       '橙手=实际握持点(贴在道具表面) · 蓝手=期望目标 · 连线颜色=跟随误差',
     ].join('<br>');
   }

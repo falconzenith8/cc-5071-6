@@ -159,6 +159,115 @@ try {
   });
   check('release works', !rel.holding);
 
+  // --- Grab lifecycle driven through the real UI controls -----------------
+  // Fresh prop (the ball): grab it, move the grip point, then destroy it.
+  const grip = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const app = window.__app;
+        const grab = app.grab;
+        let ballBody = null;
+        for (const pv of app.propVisuals)
+          if (pv.handle.spec.name === 'ball') ballBody = pv.handle.body;
+        const eye = app.player.eyePos();
+        ballBody.setTranslation({ x: eye.x, y: 1.3, z: eye.z + 1.5 }, true);
+        ballBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        ballBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        setTimeout(() => {
+          // Pick up via the same code path the click handler uses.
+          const bp = ballBody.translation();
+          app.camera.position.set(eye.x, eye.y, eye.z);
+          app.camera.lookAt(bp.x, bp.y, bp.z);
+          app.camera.updateMatrixWorld(true);
+          const grabbed = grab.tryGrab(app.camera);
+          const c = grab.held?.constraint;
+          const rotBefore = c ? { ...c.rotOffset } : null;
+          const anchorBefore = c ? { ...c.localAnchor } : null;
+          // Change the grip point: rotate + roll the held prop (R-mouse / Q-E).
+          grab.rotateHeld(180, 60);
+          grab.rollHeld(1, 0.5);
+          const rotAfter = { ...grab.held.constraint.rotOffset };
+          const countEl = document.querySelector('.constraint-count');
+          const btn = document.getElementById('delete-held-btn');
+          resolve({
+            grabbed,
+            constraintCount: grab.constraintCount,
+            panelCount: countEl?.textContent ?? '',
+            deleteEnabledBefore: btn ? !btn.disabled : false,
+            rotChanged: rotBefore
+              ? Math.abs(
+                  rotBefore.x * rotAfter.x +
+                    rotBefore.y * rotAfter.y +
+                    rotBefore.z * rotAfter.z +
+                    rotBefore.w * rotAfter.w,
+                ) < 0.999
+              : false,
+            // The anchor rides the body and is untouched by grip rotation.
+            anchorStable:
+              anchorBefore &&
+              Math.abs(anchorBefore.x - c.localAnchor.x) < 1e-12 &&
+              Math.abs(anchorBefore.y - c.localAnchor.y) < 1e-12 &&
+              Math.abs(anchorBefore.z - c.localAnchor.z) < 1e-12,
+          });
+        }, 400);
+      }),
+  );
+  check('second pickup succeeds through the grab kernel', grip.grabbed);
+  check('constraint count is 1 while holding and shown in the panel', grip.constraintCount === 1 && grip.panelCount.includes('1'));
+  check('delete button is enabled only while a constraint is active', grip.deleteEnabledBefore);
+  check('changing the grip point updates the constraint rotOffset', grip.rotChanged);
+  check('the local anchor stays fixed while the grip rotates', grip.anchorStable);
+
+  // Let the patched constraint run, then destroy the held prop via the UI
+  // button (same path as the X key): body freed, visual removed, count back to 0.
+  const destroy = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const app = window.__app;
+        const grab = app.grab;
+        const heldHandle = grab.held?.prop ?? null;
+        const visualsBefore = app.propVisuals.length;
+        setTimeout(() => {
+          document.getElementById('delete-held-btn').click();
+          setTimeout(() => {
+            const countEl = document.querySelector('.constraint-count');
+            const btn = document.getElementById('delete-held-btn');
+            resolve({
+              bodyGone: heldHandle ? window.__app && grab.removeProp(heldHandle) === false : false,
+              constraintCount: grab.constraintCount,
+              holding: grab.isHolding,
+              panelCount: countEl?.textContent ?? '',
+              deleteDisabledAfter: btn ? btn.disabled : true,
+              visualRemoved: app.propVisuals.every((pv) => pv.handle !== heldHandle),
+              visualDelta: visualsBefore - app.propVisuals.length,
+            });
+          }, 300);
+        }, 600);
+      }),
+  );
+  check('destroying the held prop frees its body (repeat removal reports false)', destroy.bodyGone);
+  check('constraint count returns to 0 in kernel and panel', destroy.constraintCount === 0 && destroy.panelCount.includes('0') && !destroy.holding);
+  check('delete button disables after the constraint is torn down', destroy.deleteDisabledAfter);
+  check('the prop visual is removed from the scene', destroy.visualRemoved && destroy.visualDelta === 1);
+
+  // The simulation must keep running cleanly after the destruction.
+  const stillAlive = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const app = window.__app;
+        const remaining = app.propVisuals.map((pv) => pv.handle.spec.name).sort();
+        setTimeout(() => {
+          const sane = app.propVisuals.every((pv) => {
+            const p = pv.handle.body.translation();
+            return Number.isFinite(p.x + p.y + p.z);
+          });
+          resolve({ sane, remaining, count: app.grab.constraintCount });
+        }, 500);
+      }),
+  );
+  check('simulation keeps running with finite prop state after destruction', stillAlive.sane && stillAlive.count === 0, stillAlive.remaining.join(','));
+  await page.screenshot({ path: join(shots, '4-after-destroy.png') });
+
   check('no page errors during interaction', errors.length === 0, errors.join('; '));
 } finally {
   await browser.close();
